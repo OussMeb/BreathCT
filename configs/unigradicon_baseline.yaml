@@ -1,0 +1,26 @@
+unigradicon:
+  raw_data_root: "/home/oussama/Desktop/MICCAI FRANCE/Learn2Breath_train_val_data"
+  train_data_root: "/home/oussama/Desktop/MICCAI FRANCE/Learn2Breath_preprocessed"
+
+  # First target: raw zero-shot validation baseline.
+  split: "validation"
+  output_dir: "outputs/unigradicon_raw_validation"
+
+  # Official uniGradICON CLI command installed by pip install unigradicon.
+  command: "unigradicon-register"
+  fixed_modality: "ct"
+  moving_modality: "ct"
+
+  # "Raw" baseline: no instance optimization.
+  # Later, test io_iterations: "50" as a separate stronger baseline.
+  io_iterations: "None"
+  io_sim: "lncc2"
+
+  device: "cuda"
+  make_zip: true
+  evaluate: true
+  overwrite: false
+  save_warped: true
+  save_canonical: true
+  stop_on_error: true
+  case_ids: []

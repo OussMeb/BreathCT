@@ -1,0 +1,40 @@
+data:
+  raw_data_root: "/home/oussama/Desktop/MICCAI FRANCE/Learn2Breath_train_val_data"
+  init_dvf_dir: "/home/oussama/Desktop/MICCAI FRANCE/outputs/unigradicon_raw_training/dvfs_canonical_ras"
+  hu_min: -1000.0
+  hu_max: 600.0
+  foreground_threshold_hu: -995.0
+
+model:
+  input_channels: 5
+  base_channels: 4
+  max_channels: 32
+  predict: "svf"
+  integration_steps: 4
+  max_residual_voxels: 1.5
+
+loss:
+  image: 1.0
+  bending: 0.05
+  jacobian: 2.0
+  lncc_window: 7
+
+train:
+  output_dir: "outputs/refiner_cached_lowspace"
+  epochs: 20
+  reduce_factor: 2
+  lr: 0.0001
+  weight_decay: 0.000001
+  seed: 2026
+  amp: false
+  grad_clip: 1.0
+  save_every: 5
+  log_every: 10
+  device: "cuda"
+
+infer:
+  init_dvf_dir: "/home/oussama/Desktop/MICCAI FRANCE/outputs/unigradicon_raw_validation/dvfs_canonical_ras"
+  output_dir: "outputs/refiner_cached_lowspace_validation"
+  make_zip: true
+  overwrite: true
+  device: "cuda"
