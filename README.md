@@ -1,4 +1,4 @@
-# SGR-FM Project README
+# SGR-FM Project MICCAI 2026 Learn2Breath
 ## MICCAI 2026 Learn2Breath Task 2 — EXP→INSP Deformable Lung CT Registration
 
 **Project:** SGR-FM (Segmentation-Guided Registration with Flow Matching)  
