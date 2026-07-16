@@ -5,17 +5,18 @@
 **Project:** SGR-FM — Segmentation-Guided Registration with Flow Matching  
 **Researcher:** Mebarki M. Oussama  
 **Status:** Active development  
-**Current best validation-GT-free per-case optimizer:** **C8B calibrated pseudo-label registration**  
-**Current local mean lobe Dice:** **0.979183639347**  
-**Current local mean folding:** **0.088432671647%**  
-**Current GT-oracle diagnostic upper bound:** **0.984083315736**  
-**Last updated:** 2026-07-14
+**Current hybrid framework:** **C10 label-aware registration with explicit GT/pseudo routing**  
+**Current best validation-GT-free local result:** **C8B — 0.979183639347 mean lobe Dice**  
+**C10 forced-pseudo validation result:** **0.979129733326 mean lobe Dice**  
+**C10 GT-available validation result:** **0.984021391501 mean lobe Dice**  
+**Current GT-oracle diagnostic upper bound:** **C8A — 0.984083315736 mean lobe Dice**  
+**Last updated:** 2026-07-16
 
 ---
 
 # 1. Executive summary
 
-The project began from a fully audited raw uniGradICON EXP→INSP baseline and evolved through support guidance, segmentation-guided residual test-time optimization, hierarchical lobe/fissure surface refinement, localized MIND refinement, lineage retuning, RML-aware refinement, relaxed-topology semantic registration, multi-initializer selection, a validation-GT oracle diagnostic, and finally GT-gap-calibrated pseudo-label registration.
+The project began from a fully audited raw uniGradICON EXP→INSP baseline and evolved through support guidance, segmentation-guided residual test-time optimization, hierarchical lobe/fissure surface refinement, localized MIND refinement, lineage retuning, RML-aware refinement, relaxed-topology semantic registration, multi-initializer selection, a validation-GT oracle diagnostic, GT-gap-calibrated pseudo-label registration, and finally an explicit hybrid label-aware deployment framework.
 
 The current best non-oracle local result is:
 
@@ -37,6 +38,33 @@ C8B then transferred part of this oracle information into a pseudo-label-only pe
 
 C8B is therefore the current practical baseline, but it remains **validation-calibrated** because its global lobe weights were derived from the C8A validation-GT gap audit. It does not use case-specific GT labels during optimization, but it should not be described as completely independent of validation-label development.
 
+C10 now makes the anatomical-source decision explicit:
+
+```text
+paired GT labels exist and policy permits their use
+→ ground-truth-guided branch
+
+otherwise
+→ automatic-segmentation/pseudo-label branch
+```
+
+The recovered C10 evidence contains results for both intended operating conditions; the forced-pseudo mode is explicitly verified, while the main GT-branch attribution still requires its unrecovered case manifests:
+
+```text
+C10 validation, GT available     = 0.984021391501 true mean lobe Dice
+C10 validation, forced pseudo    = 0.979129733326 true mean lobe Dice
+label-source penalty             = 0.004891658175
+
+C10 unlabeled training pilot     = 10 cases, no true lobe Dice
+mean pseudo transport Dice       = 0.933362709933
+mean folding                     = 0.227539685308%
+max folding                      = 0.406932182053%
+```
+
+C10 therefore supports the hybrid architecture at the output level, pending a runner/config audit. It does not change the competition-safety rule: the GT branch is usable only if labels are genuinely exposed to the submitted method. If the hidden evaluator exposes CT pairs only, the pseudo branch is mandatory.
+
+The ten-case unlabeled training run is a deployment pilot, not a completed 100- or 200-case robustness study and not evidence of true anatomical Dice. It nevertheless exposes a larger pseudo-consistency and topology gap than the ten validation cases, so broad stress testing is now a priority.
+
 ---
 
 # 2. Task definition
@@ -55,6 +83,8 @@ The submitted displacement field follows the pull/backward convention:
 warped_EXP[x] = EXP[x + DVF[x]]
 ```
 
+The DVF is dense: every sampled EXP voxel is transformed, including lung parenchyma, vessels, bronchi, chest wall, mediastinum, and structures outside the lobes. This must not be confused with dense anatomical supervision. A lobe-label loss directly constrains lobe regions and fissure boundaries, but it does not by itself establish correct vessel, airway, lesion, or whole-thorax correspondence.
+
 ## Dataset
 
 ### Training set
@@ -72,6 +102,16 @@ warped_EXP[x] = EXP[x + DVF[x]]
 - Until C8A, they were not used directly inside the registration optimizer.
 - C8A intentionally used them as an oracle diagnostic.
 - C8B uses no case-specific GT labels in optimization, but uses global calibration statistics derived from C8A.
+- C10 can resolve paired validation labels to the GT branch when the selected policy permits it.
+- A separate C10 forced-pseudo run is required to test label-free behavior on the same cases.
+
+### Hidden test set and method-input uncertainty
+
+- The project expects 100 paired COPDGene INSP/EXP scans in the hidden test.
+- The evaluator must possess hidden labels to score Dice, but this does not imply that submitted methods can read those labels.
+- Until the organizers explicitly confirm the algorithm input contract, the deployable submission must be assumed to receive CT pairs only.
+- C10 must record the selected `label_mode` per case; it must never silently substitute or mix GT and pseudo anatomy.
+- The GT-available branch is a conditional capability, not a justification for packaging hidden or validation labels with a submission.
 
 ### Nominal image geometry
 
@@ -135,6 +175,19 @@ The statement that every branch uses exact pull composition is no longer true fo
 - Their final `dvfs/` outputs were evaluated successfully on the challenge grid and are the authoritative outputs.
 - The `dvfs_canonical_ras/` folders produced by the recent lightweight C7B/C8A/C8B patches should not be assumed to be independently verified canonical conversions. They mirror the exported field and must be re-audited before reuse as canonical assets.
 
+## Optimization-supervision caveat
+
+C8A starts from C7B and optimizes a residual using GT lobe Dice, residual smoothness, and residual-magnitude regularization. Its residual stages do not directly optimize CT intensity, MIND, vessel, airway, landmark, or whole-thorax correspondence.
+
+Consequently:
+
+- the final field warps the complete image;
+- the lobe geometry is directly supervised;
+- internal lung structures inherit correspondence mainly from the parent field and the smoothness assumptions;
+- high lobe Dice alone does not prove equally high internal-anatomy accuracy.
+
+The C10 metrics include NCC, HU MAE, and difference-image QC, but recorded evaluation metrics are not automatically optimization losses. The C10 code/config package must be audited before claiming that these terms are active in the objective.
+
 ---
 
 # 4. Current result timeline
@@ -157,6 +210,9 @@ The statement that every branch uses exact pull composition is no longer true fo
 | C7B | Multi-init blend/extrapolation selector | 0.978546711 | 0.083025771% | 0.211117946% | Small gain |
 | C8A | **Validation-GT oracle diagnostic** | **0.984083316** | **0.123560972%** | **0.255693104%** | Diagnostic only |
 | C8B | **GT-gap-calibrated pseudo-label TTO** | **0.979183639** | **0.088432672%** | **0.241414957%** | **Current practical champion** |
+| C10-GT | Hybrid C10, GT-available validation branch | 0.984021392 | 0.119675617% | 0.254271631% | Conditional GT branch; not CT-only safe |
+| C10-P | Hybrid C10, forced-pseudo validation branch | 0.979129733 | 0.087845990% | 0.238255092% | PASS; slightly below C8B |
+| C10-TRAIN-10 | Hybrid C10, unlabeled training pilot | GT unavailable; pseudo proxy 0.933362710 | 0.227539685% | 0.406932182% | 10-case robustness pilot only |
 
 ## Current progression
 
@@ -170,6 +226,8 @@ C6       0.976804
 C7A-v2   0.978496
 C7B      0.978547
 C8B      0.979184   ← current practical champion
+C10-P    0.979130   ← forced-pseudo C10 regression run
+C10-GT   0.984021   ← conditional GT-available C10 branch
 C8A      0.984083   ← GT-oracle diagnostic, not hidden-test-safe
 ```
 
@@ -646,9 +704,198 @@ C8B recovered only about one ninth of the measured oracle gap. This is the centr
 
 ---
 
-# 11. Current scientific conclusions
+# 11. C10 — hybrid label-aware registration
 
-## 11.1 The basic registration conventions are not the main problem
+## 11.1 Purpose and routing policy
+
+C10 turns the GT/pseudo distinction into one explicit registration interface. The registration backend can remain common while the anatomical target source changes according to data availability and policy.
+
+The required case-level behavior is:
+
+```python
+if (
+    policy_permits_gt
+    and fixed_gt_lobes_exist
+    and moving_gt_lobes_exist
+):
+    label_mode = "ground_truth"
+    fixed_labels = fixed_gt_lobes
+    moving_labels = moving_gt_lobes
+else:
+    label_mode = "pseudo"
+    fixed_labels = segment(fixed_ct)
+    moving_labels = segment(moving_ct)
+```
+
+Safety requirements:
+
+- both fixed and moving GT labels must exist before entering the GT branch;
+- the selected mode must be written to each case manifest and summary;
+- partial or silent GT/pseudo mixing is forbidden;
+- a forced-pseudo policy must remain available for CT-only regression testing even when local GT exists;
+- missing labels must trigger the pseudo branch, not a crash and not an implicit use of evaluator-only labels.
+
+This is scientifically reasonable for deployment: label-rich cases can use the best available anatomy, while label-free cases remain fully automatic.
+
+## 11.2 Verified C10 output metrics
+
+The recovered C10 metrics and QC support three runs:
+
+| Run | Cases | Anatomical source | True mean lobe Dice | Pseudo mean lobe Dice | Mean folding | Max folding | Mean NCC after |
+|---|---:|---|---:|---:|---:|---:|---:|
+| C10 hybrid validation | 10 | GT available; GT QC overlay; mode manifest pending | 0.984021392 | 0.984591940 | 0.119675617% | 0.254271631% | 0.729580819 |
+| C10 forced-pseudo validation | 10 | pseudo, histogram `pseudo: 10` | 0.979129733 | 0.989530391 | 0.087845990% | 0.238255092% | 0.804103846 |
+| C10 unlabeled training pilot | 10 | pseudo overlay | unavailable | 0.933362710 | 0.227539685% | 0.406932182% | 0.438406596 |
+
+QC titles independently confirm `label overlay=GT` for the recovered validation hybrid examples and `label overlay=pseudo` for the recovered training examples. A QC overlay identifies what was visualized; by itself it does not prove which labels entered the optimizer. The forced-pseudo summary does prove `status: PASS`, ten cases, zero failures, and `label_mode_histogram: {"pseudo": 10}`.
+
+The main C10 validation run is treated below as the intended GT branch because validation GT was available, the project policy selects it, and the result closely reproduces C8A. Its case-level mode histogram/manifests were not recoverable, so this attribution must be confirmed during the code-package audit.
+
+Comparison with the preceding branches:
+
+```text
+C10 GT branch − C8A oracle       = -0.000061924235
+C10 pseudo branch − C8B          = -0.000053906021
+C10 GT branch − C10 pseudo       = +0.004891658175
+```
+
+C10 therefore reproduces the two established performance regimes to within approximately `6.2e-5`. It currently adds a coherent deployment interface, not a new label-free accuracy record. C8B remains the best local GT-free validation result by approximately `0.000053906`.
+
+## 11.3 Measured label-source gap
+
+Under the intended C10 mode attribution above, the GT-available run exceeds the forced-pseudo run on the same ten validation cases by:
+
+```text
+0.004891658175 mean lobe Dice
+```
+
+Per-lobe true validation Dice is:
+
+| Lobe | C10 GT branch | C10 pseudo branch | GT−pseudo |
+|---|---:|---:|---:|
+| LUL | 0.988472086 | 0.987187481 | +0.001284606 |
+| LLL | 0.985220737 | 0.982468807 | +0.002751930 |
+| RUL | 0.986936355 | 0.982709578 | +0.004226777 |
+| RML | 0.973576481 | 0.960410873 | +0.013165608 |
+| RLL | 0.985901298 | 0.982871928 | +0.003029370 |
+
+The RML remains the dominant source of the gap.
+
+The proxy behavior is also informative:
+
+- forced-pseudo C10 has much higher pseudo-label Dice than the GT branch (`0.989530` versus `0.984592`);
+- forced-pseudo C10 also has higher post-warp NCC (`0.804104` versus `0.729581`) and lower post-warp HU MAE (`55.446` versus `61.903`);
+- nevertheless, its true GT lobe Dice is lower by `0.004892`.
+
+This is direct evidence that pseudo overlap and global CT similarity are useful but imperfect selection proxies. Neither should be treated as a substitute for anatomical ground truth.
+
+## 11.4 Ten-case unlabeled training pilot
+
+The recovered training metrics cover `NLST_0011` through `NLST_0020`. All ten cases appear in the PASS evaluation file, but no training GT lobes exist.
+
+Aggregate proxy results:
+
+```text
+mean pseudo transport Dice  = 0.933362709933
+minimum case pseudo Dice    = 0.885855074363
+maximum case pseudo Dice    = 0.967220007034
+mean folding                = 0.227539685308%
+max folding                 = 0.406932182053%
+mean NCC before             = 0.273752364615
+mean NCC after              = 0.438406596285
+mean NCC gain               = 0.164654231670
+mean HU MAE before          = 142.527125549
+mean HU MAE after           = 83.000247574
+mean DVF p95 magnitude      = 14.346451759 vox
+```
+
+Per-lobe pseudo transport Dice:
+
+| Lobe | Mean proxy Dice |
+|---|---:|
+| LUL | 0.976824297 |
+| LLL | 0.976240544 |
+| RUL | 0.948743264 |
+| RML | 0.848905155 |
+| RLL | 0.916100290 |
+
+The training pilot is materially harder than the ten validation cases by the available proxies. In particular, the RML proxy falls below `0.85`, and the maximum folding approaches the development hard limit of `0.50%`.
+
+This pilot can support claims about execution, proxy consistency, image similarity, deformation magnitude, and topology. It cannot establish true lobe Dice or predict that hidden-test Dice will exceed `0.98`.
+
+## 11.5 Dense transformation versus anatomical supervision
+
+C10 outputs a dense DVF, so the full EXP image is sampled under the transformation. However, this does not mean that every internal structure is directly supervised.
+
+Five lobe masks strongly constrain:
+
+- the outer lung/lobe shapes;
+- fissure interfaces;
+- regional volume transport.
+
+They weakly constrain or do not directly identify:
+
+- internal vessels and airway bifurcations;
+- lesions and local parenchymal patterns;
+- sliding motion near the pleura;
+- mediastinal and chest-wall correspondence;
+- structures outside the labeled lungs.
+
+Two fields can therefore obtain almost identical lobe Dice while differing substantially in internal correspondence. C10 QC, NCC, and HU MAE help detect gross failures, but vessel/airway/landmark evaluation or a structural optimization term is required for stronger claims.
+
+## 11.6 Proposed unified C10 objective
+
+The final hybrid system should use the label source conditionally but keep a common multi-cue objective:
+
+```text
+L = λlabel   · Llabel
+  + λimage   · LMIND/LNCC
+  + λsurface · Lfissure/surface
+  + λsmooth  · Lsmooth
+  + λjac     · LJacobian/topology
+  + λmag     · Lresidual-magnitude
+```
+
+Mode-specific behavior:
+
+- with GT available, `Llabel` uses GT lobes;
+- without GT, `Llabel` uses confidence-weighted pseudo lobes;
+- CT/feature, surface, regularization, and topology terms remain active in both modes;
+- uncertain pseudo boundaries, especially the EXP RML/right fissures, receive reduced or spatially calibrated label weight;
+- the selector must evaluate label, structural, and topology criteria rather than maximizing pseudo Dice alone.
+
+This objective is the next design target. The recovered metrics do not prove that all these terms are already implemented in C10.
+
+## 11.7 Hidden-test policy scenarios
+
+Three input contracts remain possible:
+
+1. **Hidden labels are exposed to the algorithm.** C10 may use the GT branch if challenge rules explicitly permit it.
+2. **Only CT pairs are exposed.** C10 must use the pseudo branch.
+3. **Labels exist only inside the scorer.** This is operationally identical to CT-only input for the submitted method; C10 must use the pseudo branch.
+
+Until written organizer clarification is obtained, development and packaging must assume scenarios 2 or 3. The forced-pseudo branch is therefore the submission-critical path.
+
+## 11.8 C10 evidence-package limitation
+
+The supplied `c10.zip` was truncated at `15,925,248` bytes, during a QC PNG, and lacked its central directory. Fourteen complete entries were recovered with size and CRC verification, including:
+
+- validation and training JSON/CSV metrics;
+- the forced-pseudo C10 summaries;
+- three validation and three training QC images.
+
+The runner, configuration, manifests, complete QC set, and code fingerprints were not present in the recoverable prefix. Therefore:
+
+- the numerical results above are verified from recovered outputs;
+- the exact implementation and command line are not yet independently audited;
+- no C10 code hash should be frozen from this attachment;
+- a small code/config/manifests-only archive must be supplied before the C10 implementation is declared reproducible.
+
+---
+
+# 12. Current scientific conclusions
+
+## 12.1 The basic registration conventions are not the main problem
 
 The baseline geometry was independently audited, and multiple branches consistently improved Dice. C8A showed that the same general deformation machinery can gain more than `0.0055` when given correct anatomical targets.
 
@@ -660,7 +907,7 @@ Therefore, the project is not primarily blocked by:
 - wrong output grid;
 - inability to produce useful deformation.
 
-## 11.2 Automatic anatomical target quality is the dominant current bottleneck
+## 12.2 Automatic anatomical target quality is the dominant current bottleneck
 
 Evidence:
 
@@ -669,8 +916,10 @@ Evidence:
 - C8A increased RML by approximately `0.01449` on average relative to C7B.
 - `NLST_0006` EXP pseudo RML Dice against GT was only approximately `0.85558`.
 - C8B class reweighting improved the score but recovered only approximately `11.5%` of the oracle gap.
+- C10 measured a `0.004891658` mean-Dice penalty when the same validation cohort was switched from GT to pseudo anatomy.
+- The C10 training pilot reduced the RML pseudo-transport proxy to approximately `0.84891`, indicating that the segmentation/registration problem is harder outside the validation cohort.
 
-## 11.3 Registration/regularization remains a secondary bottleneck
+## 12.3 Registration/regularization remains a secondary bottleneck
 
 C8A did not reach a mean of 0.988 even with GT labels.
 
@@ -683,8 +932,9 @@ The remaining limitations include:
 - folding penalties and hard rejection;
 - candidate-scale discretization;
 - lack of exact residual composition in the recent lightweight branches.
+- lack of a verified common label + CT/feature + surface objective in C10.
 
-## 11.4 High validation scores do not prove hidden-test superiority
+## 12.4 High validation scores do not prove hidden-test superiority
 
 A visible validation method may use:
 
@@ -700,34 +950,40 @@ What can be stated is:
 
 > Direct use of validation GT can substantially inflate visible-validation performance relative to a method that must infer anatomy automatically at test time.
 
-## 11.5 Current method is a pipeline, not a single model that “understands” both tasks
+## 12.5 C10 is a conditional pipeline, not a single model that “understands” both tasks
 
-The practical pipeline is:
+The current architecture is:
 
 ```text
-pretrained lobe segmentation
-→ pseudo-anatomical targets
+paired labels available and permitted?
+├── yes → GT anatomical targets
+└── no  → pretrained lobe segmentation → pseudo-anatomical targets
 → pretrained registration initializer
+→ common registration/refinement backend
 → case-specific semantic TTO
 → selector / fallback
 → DVF
 ```
 
-It is not yet a jointly trained segmentation-registration model.
+It is not yet a jointly trained segmentation-registration model, and the current evidence does not establish that both branches optimize an identical multi-cue objective.
 
-Testing on the 200 training pairs will measure pipeline robustness, not true lobe Dice, because training GT lobes are unavailable.
+Testing on the unlabeled training pairs measures pipeline robustness, not true lobe Dice, because training GT lobes are unavailable. C10 has completed only a ten-case pilot so far.
+
+## 12.6 Whole-image warping is not whole-image validation
+
+The dense C10 DVF transforms every voxel, but the current primary anatomical metric observes only five lobes. Claims about vessels, bronchi, lesions, sliding surfaces, or structures outside the lungs require additional losses and evaluation targets.
 
 ---
 
-# 12. Current limitations
+# 13. Current limitations
 
-## 12.1 Pseudo-label geometry
+## 13.1 Pseudo-label geometry
 
 The largest limitation is not only label confidence but boundary placement.
 
 C8B reweighted the pseudo labels but did not change their geometry. It therefore cannot correct a pseudo RML boundary that is systematically misplaced.
 
-## 12.2 RML and right fissures
+## 13.2 RML and right fissures
 
 The RML remains the weakest lobe in C8B:
 
@@ -744,7 +1000,7 @@ NLST_0008 C8B RML = 0.949485379
 NLST_0010 C8B RML = 0.949130010
 ```
 
-## 12.3 Validation calibration and overfitting risk
+## 13.3 Validation calibration and overfitting risk
 
 C8B does not use validation GT during per-case optimization, but its global calibration depends on C8A validation-GT statistics.
 
@@ -756,23 +1012,25 @@ Repeated tuning on only ten validation cases can overfit:
 - candidate scales;
 - stage schedules.
 
-## 12.4 Additive displacement updates
+## 13.4 Additive displacement updates
 
 C7A onward largely uses additive residual updates. Exact pull composition should be restored before large residuals or training-time teacher generation.
 
-## 12.5 Canonical-output labeling
+## 13.5 Canonical-output labeling
 
 The recent `dvfs_canonical_ras/` outputs have not undergone the same independent canonical-frame audit as the original baseline and early branches.
 
 Use final `dvfs/` plus `evaluate_validation.py` as the authoritative result.
 
-## 12.6 Proxy metrics are not ground truth
+## 13.6 Proxy metrics are not ground truth
 
 C8B pseudo Dice increased by approximately `0.000782`, while GT Dice increased by approximately `0.000637`. The correlation is positive but imperfect.
 
 A candidate that improves pseudo labels can still worsen true anatomy.
 
-## 12.7 No true train-set Dice
+C10 strengthens this warning: the forced-pseudo validation branch achieved better pseudo Dice and NCC than the GT branch while producing lower true GT lobe Dice.
+
+## 13.7 No true train-set Dice
 
 The 200 training pairs do not include lobe ground truth. Evaluation there must rely on:
 
@@ -785,15 +1043,39 @@ The 200 training pairs do not include lobe ground truth. Evaluation there must r
 - failure/fallback rate;
 - qualitative review.
 
-## 12.8 Deleted training/output assets
+## 13.8 Deleted training/output assets
 
 Older generated training DVFs and training-output folders were deleted for storage reasons.
 
 Historical freeze verification passed for 220 files, but future work must not assume those generated assets still exist. They must be inventoried or regenerated before train-set experiments.
 
+## 13.9 C10 robustness scale
+
+Only ten unlabeled training cases have been evaluated in the recovered C10 pilot. This is insufficient to estimate the failure rate expected on a 100-case hidden cohort.
+
+The next stress test must record:
+
+- completion and fallback rate;
+- segmentation failures and empty/missing lobes;
+- folding and Jacobian quantiles;
+- inverse consistency;
+- NCC/MIND and HU residuals;
+- pseudo-label transport consistency;
+- displacement magnitudes;
+- runtime and peak CPU/GPU memory;
+- case-level outlier flags and QC.
+
+## 13.10 Hidden-label input contract
+
+The project does not yet have written confirmation that hidden labels are exposed to submitted methods. Evaluator access to labels is not equivalent to participant-method access. The GT branch must remain disabled unless the interface and rules explicitly permit it.
+
+## 13.11 C10 reproducibility package
+
+The C10 outputs are partially verified, but the supplied archive was truncated before the runner/config/manifests could be recovered. Exact loss terms, policy options, parent DVFs, path resolution, fallback logic, and hashes remain pending a code-only package audit.
+
 ---
 
-# 13. Official validation milestones
+# 14. Official validation milestones
 
 ## First topology-safe submission
 
@@ -823,11 +1105,11 @@ C4 official visible score:
 
 The local-to-server difference should not be treated as a constant offset.
 
-Later C7/C8 results in this README are local unless separately packaged and submitted.
+Later C7/C8/C10 results in this README are local unless separately packaged and submitted.
 
 ---
 
-# 14. Reproducibility and frozen assets
+# 15. Reproducibility and frozen assets
 
 ## Historical freeze verification
 
@@ -879,9 +1161,22 @@ C8B calibrated pseudo-label patch
 28438fa7451f8ed02d38c4a214fb17f0f0d666d2aef785f31a640c74bc32540f
 ```
 
+## C10 evidence status
+
+Verified from the recoverable C10 output prefix:
+
+```text
+c10_hybrid_label_aware/evaluation/validation/validation_metrics.json
+c10_hybrid_label_aware/evaluation/training/training_metrics.json
+c10_validation_pseudo/c10_hybrid_summary.json
+c10_validation_pseudo/c10_validation_summary.json
+```
+
+The C10 runner/config/manifests and a complete archive hash are still pending. Do not mark C10 frozen or submission-ready until a code-only package is audited and its parent/input fingerprints are recorded.
+
 ---
 
-# 15. Current output directories
+# 16. Current output directories
 
 ```text
 outputs/sgr_fm/
@@ -897,7 +1192,9 @@ outputs/sgr_fm/
 ├── c7a_v2_relaxed_selector/
 ├── c7b_multi_init_semantic/
 ├── c8a_gt_oracle/
-└── c8b_pseudolabel_calibrated/
+├── c8b_pseudolabel_calibrated/
+├── c10_hybrid_label_aware/
+└── c10_validation_pseudo/
 ```
 
 The most important current directories are:
@@ -905,6 +1202,8 @@ The most important current directories are:
 ```text
 outputs/sgr_fm/c8b_pseudolabel_calibrated/
 outputs/sgr_fm/c8a_gt_oracle/
+outputs/sgr_fm/c10_hybrid_label_aware/
+outputs/sgr_fm/c10_validation_pseudo/
 outputs/sgr_fm/c7b_multi_init_semantic/
 outputs/sgr_fm/c6_rml_aware/
 outputs/sgr_fm/segmentation_phase1_totalsegmentator/
@@ -912,7 +1211,7 @@ outputs/sgr_fm/segmentation_phase1_totalsegmentator/
 
 ---
 
-# 16. Recent commands
+# 17. Recent commands
 
 ## C7B
 
@@ -947,11 +1246,31 @@ C8B summary:
 outputs/sgr_fm/c8b_pseudolabel_calibrated/c8b_pseudolabel_calibrated_summary.json
 ```
 
+## C10 hybrid runs
+
+The exact C10 runner and configuration filenames were not recoverable from the truncated attachment. They must not be guessed in the reproducibility record. After the code-only package is supplied, record separate commands for:
+
+- automatic GT-when-available routing;
+- forced-pseudo validation;
+- the unlabeled training stress test;
+- post-run evaluation/QC.
+
+Verified C10 output locations:
+
+```text
+outputs/sgr_fm/c10_hybrid_label_aware/evaluation/validation/validation_metrics.json
+outputs/sgr_fm/c10_hybrid_label_aware/evaluation/training/training_metrics.json
+outputs/sgr_fm/c10_validation_pseudo/c10_hybrid_summary.json
+outputs/sgr_fm/c10_validation_pseudo/c10_validation_summary.json
+```
+
 ---
 
-# 17. Current decision and next development step
+# 18. Current decision and next development step
 
-## Frozen practical champion
+## Current branch roles
+
+### Label-free validation champion
 
 ```text
 C8B calibrated pseudo-label registration
@@ -960,7 +1279,20 @@ mean folding  = 0.088432671647%
 max folding   = 0.241414956920%
 ```
 
-## Frozen oracle diagnostic
+C8B remains the current label-free champion. The C10 forced-pseudo regression is extremely close but lower by `0.000053906021`.
+
+### Hybrid deployment framework
+
+```text
+C10 label-aware registration
+GT-available validation Dice = 0.984021391501
+forced-pseudo validation Dice = 0.979129733326
+unlabeled training pilot      = 10 cases, proxy evaluation only
+```
+
+C10 is accepted as the deployment architecture because it makes label availability explicit. It is not yet frozen or submission-ready because its code/config/manifests were not recoverable from the supplied archive.
+
+### Oracle diagnostic
 
 ```text
 C8A GT-oracle
@@ -969,13 +1301,31 @@ mean folding  = 0.123560972067%
 max folding   = 0.255693104200%
 ```
 
-C8A is not the practical champion because it uses validation GT labels directly.
+C8A remains the highest local diagnostic result. It is not the practical CT-only champion because it uses validation GT labels directly.
 
-## Next branch: C8C pseudo-label geometry correction
+## Immediate reproducibility gate
 
-C8B changed lobe importance but did not correct lobe shape or boundary position.
+Before changing the C10 algorithm:
 
-The next branch should therefore modify pseudo-label geometry conservatively, particularly:
+1. Re-upload C10 as a small code/config/manifests-only archive without DVFs or PNG QC.
+2. Audit the actual label resolver, loss terms, parent DVFs, path resolution, fallback rules, and output geometry.
+3. Run synthetic smoke tests for GT, forced-pseudo, missing-one-label, missing-both-labels, and forbidden-GT policies.
+4. Verify that each case records `label_mode`, label paths/hashes, parent DVF hash, policy, fallback reason, and final geometry.
+5. Freeze a reproducible C10 baseline only after exact regression against the recovered metrics.
+
+## Next accuracy branch: unified multi-cue C10
+
+The next accuracy experiment should improve the pseudo branch while preserving the hybrid interface. Its objective should combine:
+
+- GT labels when legitimately available, otherwise confidence-weighted pseudo labels;
+- CT structural similarity using MIND and/or local NCC;
+- lobe SDF and fissure/surface alignment;
+- smoothness and residual-magnitude control;
+- explicit Jacobian/topology control;
+- exact pull-field composition for nontrivial residuals;
+- parent fallback and non-RML regression guards.
+
+Pseudo-geometry work should remain concentrated on:
 
 - EXP RML;
 - RUL–RML horizontal fissure;
@@ -983,47 +1333,60 @@ The next branch should therefore modify pseudo-label geometry conservatively, pa
 - hard-case right-lung boundaries;
 - confidence-weighted boundary regions.
 
-The intended constraints are:
+The submission-critical pseudo branch must satisfy:
 
 ```text
 no case-specific validation GT at inference
-small, global or confidence-driven corrections
+no GT-based per-case candidate selection
+small, confidence-driven anatomical corrections
 exact-parent fallback
 non-RML preservation
 soft folding zone 0.25–0.30%
 hard rejection 0.50%
 ```
 
-Potential C8C mechanisms:
+Candidate mechanisms:
 
 1. Global RML/right-fissure morphological calibration derived from the C8A gap audit.
 2. Confidence maps that weaken pseudo-label loss where the segmenter is unreliable.
 3. Boundary-offset correction rather than whole-lobe dilation.
 4. Multiple corrected pseudo-label candidates with a non-GT selector.
 5. Exact composition restoration for the residual update.
-6. Independent evaluation on the 200 training pairs using robustness proxies before any teacher-student training.
+6. Structural CT/MIND evidence to reject pseudo-consistent but anatomically implausible candidates.
+7. Surface-distance and internal vessel/airway proxy evaluation in addition to lobe Dice.
 
-## Training on the 200 pairs
+## Scale-up plan for unlabeled cases
 
-Training remains deferred until the teacher baseline is stronger and more geometrically reliable.
-
-The correct sequence is:
+The recovered C10 training run contains only ten cases. Scale-up should be staged:
 
 ```text
-C8C corrected pseudo-label baseline
-→ validate locally
-→ stress-test on 200 training pairs
+10-case pilot already completed
+→ 25-case debugging cohort
+→ 100-case deployment-matched stress test
+→ all 200 training pairs if resources permit
+```
+
+The 100-case report must summarize failures, fallback, per-case proxy distributions, folding, inverse consistency, displacement, runtime, memory, and QC outliers. It must explicitly label pseudo Dice as a proxy, not true Dice.
+
+Teacher-student training remains deferred until the pseudo branch and geometry are stronger:
+
+```text
+C10 reproducibility audit
+→ unified multi-cue forced-pseudo baseline
+→ validation regression without per-case GT selection
+→ 100-case unlabeled stress test
+→ optional 200-case completion
 → regenerate frozen teacher DVFs
 → train a lung-specific registration/refinement model
 → reapply semantic TTO
 → evaluate hidden 100-case test
 ```
 
-Training directly from current C8B pseudo targets may improve speed and robustness, but it may also distill the current segmentation bias. It should not be assumed to surpass the teacher without stronger targets or additional self-supervised information.
+Training directly from current C8B/C10 pseudo targets may improve speed and robustness, but it may also distill the current RML/right-fissure bias. It should not be assumed to surpass the teacher without stronger targets or additional self-supervised structural information.
 
 ---
 
-# 18. Main lessons
+# 19. Main lessons
 
 1. **Geometry auditing was necessary.** The raw baseline is now trusted.
 2. **Topology can be improved without losing Dice.** C1 reduced folding by orders of magnitude.
@@ -1040,10 +1403,15 @@ Training directly from current C8B pseudo targets may improve speed and robustne
 13. **Lobe reweighting helps, but geometry correction is still required.**
 14. **C8B is better than C7B without per-case GT optimization, but remains validation-calibrated.**
 15. **The hidden test cannot be predicted reliably from ten validation cases alone.**
+16. **Explicit GT/pseudo routing is a valid deployment architecture, but it does not make GT available where the method input contract withholds it.**
+17. **The paired C10 runs estimate a label-source penalty of approximately `0.004892` mean Dice, pending confirmation of the main run's mode manifests.**
+18. **A dense DVF warps the whole image; five-lobe supervision does not validate every internal structure.**
+19. **Pseudo Dice and NCC can improve while true lobe Dice worsens. Multi-cue selection is required.**
+20. **The ten-case unlabeled C10 pilot is encouraging for execution but exposes harder RML/topology behavior and must be scaled.**
 
 ---
 
-# 19. Final status snapshot
+# 20. Final status snapshot
 
 | Item | Status |
 |---|---|
@@ -1068,9 +1436,16 @@ Training directly from current C8B pseudo targets may improve speed and robustne
 | C7B | PASS, small gain |
 | C8A GT-oracle | PASS, diagnostic only |
 | C8B calibrated pseudo labels | **PASS / CURRENT PRACTICAL CHAMPION** |
-| Current gap to 0.98 | **0.000816361** |
-| Next intended branch | **C8C pseudo-label geometry correction** |
-| 200-pair train stress test | PENDING |
+| C10 GT-available validation run | PASS locally, 0.984021392; optimizer mode-manifest confirmation pending |
+| C10 forced-pseudo validation branch | PASS locally, 0.979129733; slightly below C8B |
+| C10 ten-case unlabeled training pilot | PASS metrics available; true Dice unavailable |
+| C10 hybrid routing architecture | ACCEPTED AS CURRENT FRAMEWORK |
+| C10 code/config/manifests audit | **PENDING — supplied archive truncated** |
+| Current label-free gap to 0.98 | **0.000816361 using C8B** |
+| Next intended branch | **Unified label + CT/MIND + surface + topology C10** |
+| 100-pair train stress test | PENDING |
+| Full 200-pair train stress test | OPTIONAL AFTER 100-PAIR GATE |
+| Written hidden-label input clarification | PENDING |
 | Hidden 100-case test | PENDING |
 
 ---
